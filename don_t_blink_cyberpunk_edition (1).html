@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CMU CodeX Society - Don't Blink</title>
+    
+    <!-- Tailwind CSS for rapid styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Space Mono font for the cyberpunk terminal feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Face Mesh for robust facial landmark tracking directly in the browser -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Space Mono', monospace;
+            color: #0f0; /* Neon Green */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* CRT Scanline Effect Overlay */
+        .scanlines {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        /* Ambient Screen Flicker */
+        .flicker {
+            animation: flicker 0.15s infinite;
+            pointer-events: none;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.95; }
+            100% { opacity: 1; }
+        }
+
+        /* Custom Neon Utility Classes */
+        .text-neon-green {
+            color: #0f0;
+            text-shadow: 0 0 5px #0f0, 0 0 10px #0f0, 0 0 20px #024202;
+        }
+        
+        .text-neon-red {
+            color: #f00;
+            text-shadow: 0 0 5px #f00, 0 0 10px #f00, 0 0 20px #420202;
+        }
+
+        .border-neon-green {
+            border-color: #0f0;
+            box-shadow: 0 0 10px #0f0, inset 0 0 10px #0f0;
+        }
+
+        .border-neon-red {
+            border-color: #f00;
+            box-shadow: 0 0 10px #f00, inset 0 0 10px #f00;
+        }
+
+        /* Canvas Overlay Configuration */
+        #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+            transform: scaleX(-1); /* Mirror the webcam feed naturally */
+        }
+
+        #input-video {
+            display: none; /* Hide raw video feed */
+        }
+        
+        ::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Violent Screen Shake for Jumpscares */
+        .shake-extreme {
+            animation: shake-extreme 0.1s infinite cubic-bezier(.36,.07,.19,.97) both;
+        }
+        
+        @keyframes shake-extreme {
+            0% { transform: translate(10px, 10px) rotate(1deg); }
+            20% { transform: translate(-10px, -5px) rotate(-1deg); }
+            40% { transform: translate(-15px, 10px) rotate(2deg); }
+            60% { transform: translate(15px, -10px) rotate(-2deg); }
+            80% { transform: translate(-10px, -15px) rotate(1deg); }
+            100% { transform: translate(10px, 10px) rotate(-1deg); }
+        }
+
+        /* Visual RGB Split Glitch */
+        .glitch-effect {
+            animation: glitch 0.1s linear infinite;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(0); filter: hue-rotate(0deg); }
+            20% { transform: translate(-10px, 10px); filter: hue-rotate(90deg); }
+            40% { transform: translate(-10px, -10px); filter: invert(1); }
+            60% { transform: translate(10px, 10px); filter: hue-rotate(180deg); }
+            80% { transform: translate(10px, -10px); filter: sepia(1); }
+            100% { transform: translate(0); filter: hue-rotate(0deg); }
+        }
+
+        #jumpscare-overlay {
+            mix-blend-mode: hard-light;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center h-screen w-screen relative">
+
+    <video id="input-video" autoplay playsinline></video>
+    <canvas id="output-canvas"></canvas>
+
+    <!-- Aesthetic Screen Effects -->
+    <div class="scanlines"></div>
+    <div class="flicker absolute inset-0 z-40 bg-black/10 transition-colors duration-200" id="screen-flash"></div>
+
+    <!-- Jumpscare Cyber-Skull Asset -->
+    <div id="jumpscare-overlay" class="absolute inset-0 hidden z-[100] flex items-center justify-center pointer-events-none bg-black">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" class="w-[120vw] h-[120vh] glitch-effect drop-shadow-[0_0_100px_#f00]">
+            <polygon points="30,20 170,20 190,100 150,180 50,180 10,100" fill="#000" stroke="#f00" stroke-width="4"/>
+            <path d="M30,20 L60,60 M170,20 L140,60 M10,100 L50,100 M190,100 L150,100" stroke="#f00" stroke-width="2"/>
+            <polygon points="40,70 80,60 90,90 50,100" fill="#f00"/>
+            <polygon points="160,70 120,60 110,90 150,100" fill="#f00"/>
+            <circle cx="65" cy="80" r="5" fill="#fff"/>
+            <circle cx="135" cy="80" r="5" fill="#fff"/>
+            <polygon points="100,100 90,130 110,130" fill="#f00"/>
+            <rect x="60" y="150" width="10" height="20" fill="#f00"/>
+            <rect x="80" y="150" width="10" height="30" fill="#fff"/>
+            <rect x="100" y="150" width="10" height="35" fill="#f00"/>
+            <rect x="120" y="150" width="10" height="30" fill="#fff"/>
+            <rect x="140" y="150" width="10" height="20" fill="#f00"/>
+            <text x="50%" y="50%" text-anchor="middle" fill="#fff" font-size="20" font-weight="bold" font-family="monospace" opacity="0.5">BREACH</text>
+        </svg>
+    </div>
+
+    <div id="ui-container" class="absolute z-30 flex flex-col items-center justify-center w-full h-full p-4 md:p-8 pointer-events-none">
+    
+        <!-- Static Headers -->
+        <div class="absolute top-4 left-4 md:top-10 md:left-10 font-bold tracking-widest flex flex-col">
+            <span class="text-neon-green text-xl md:text-3xl drop-shadow-[0_0_10px_#0f0] uppercase">CMU CodeX Society</span>
+            <span class="text-xs md:text-sm text-green-700 mt-1">TRACKING: <span id="face-status">FALSE</span></span>
+        </div>
+
+        <!-- High Score UI -->
+        <div class="absolute top-4 right-4 md:top-10 md:right-10 text-sm md:text-xl font-bold tracking-widest flex flex-col items-end">
+            <span class="text-neon-green">MAX_SURVIVAL</span>
+            <span id="high-score-display" class="text-2xl md:text-3xl text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]">0.0s</span>
+        </div>
+
+        <!-- Random Distraction Warning Text Overlay -->
+        <div id="distraction-overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none hidden z-50">
+            <span class="text-4xl md:text-8xl font-bold text-neon-red opacity-80 uppercase tracking-widest glitch-effect mix-blend-screen text-center px-4">WARNING!</span>
+        </div>
+
+        <!-- Tier Progression Notifications -->
+        <div id="tier-notification" class="absolute inset-0 flex items-center justify-center pointer-events-none hidden z-40 transition-opacity duration-500 opacity-0">
+            <span id="tier-text" class="text-2xl md:text-5xl font-bold text-neon-green uppercase tracking-widest glitch-effect text-center px-6 py-4 bg-black/90 border border-neon-green rounded shadow-[0_0_20px_#0f0]"></span>
+        </div>
+
+        <!-- Main Game Interaction Panel -->
+        <div id="game-panel" class="flex flex-col items-center max-w-2xl w-full bg-black/70 p-6 md:p-10 border-2 border-neon-green rounded-sm pointer-events-auto backdrop-blur-md transition-all duration-300">
+        
+            <h1 id="main-title" class="text-3xl md:text-5xl font-bold mb-4 md:mb-6 text-neon-green text-center uppercase tracking-widest">
+                SYSTEM STANDBY
+            </h1>
+            
+            <p id="instruction-text" class="text-base md:text-xl text-center mb-6 md:mb-10 text-gray-300 min-h-[4rem]">
+                Please allow camera access. Initializing neural network...
+            </p>
+
+            <!-- Active Gameplay Timer -->
+            <div id="timer-container" class="w-full h-12 md:h-16 border-2 border-neon-green p-1 mb-6 md:mb-8 hidden relative bg-green-900/20 shadow-[inset_0_0_20px_rgba(0,255,0,0.1)]">
+                <div class="absolute inset-0 flex items-center justify-center text-white font-bold tracking-widest z-10 text-xl md:text-3xl">
+                    SURVIVAL TIME: <span id="timer-text" class="ml-2 md:ml-4 text-neon-green drop-shadow-[0_0_10px_#0f0]">0.0s</span>
+                </div>
+            </div>
+
+            <!-- Interactivity Buttons -->
+            <button id="action-btn" class="hidden px-6 py-3 md:px-8 md:py-4 bg-transparent border-2 border-neon-green text-neon-green font-bold text-lg md:text-xl uppercase hover:bg-green-900/50 hover:shadow-[0_0_20px_#0f0] transition-all duration-200 focus:outline-none">
+                Start Hack (Don't Blink)
+            </button>
+
+            <button id="reset-btn" class="hidden mt-4 px-4 py-2 md:px-6 md:py-2 bg-transparent border border-gray-500 text-gray-400 font-bold text-sm uppercase hover:bg-gray-800 transition-all duration-200 focus:outline-none">
+                Reboot System
+            </button>
+            
+        </div>
+        
+        <!-- Screen Center Target Decor -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 md:w-96 md:h-96 border border-green-900/30 rounded-full pointer-events-none flex items-center justify-center">
+            <div class="w-2 h-2 bg-green-500/20 rounded-full"></div>
+            <div class="absolute w-full h-[1px] bg-green-900/20"></div>
+            <div class="absolute h-full w-[1px] bg-green-900/20"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION THRESHOLDS ---
+        const BLINK_THRESHOLD = 0.22; // Tune this to adjust blink sensitivity
+        const MAX_SURVIVAL_SECONDS = 125; // 2 minutes 5 seconds to win
+        
+        // MediaPipe FaceMesh Indices for specific facial landmarks
+        const LEFT_EYE = [33, 160, 158, 133, 153, 144];
+        const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
+
+        const NOSE_TIP = 1;
+        const LEFT_CHEEK = 234;
+        const RIGHT_CHEEK = 454;
+        const TOP_HEAD = 10;
+        const BOTTOM_CHIN = 152;
+
+        // --- GAME STATE VARIABLES ---
+        let gameState = 'INITIALIZING'; // INITIALIZING, READY, COUNTDOWN, PLAYING, FAILED, VICTORY
+        let gameStartTime = 0;
+        let distractionTimer = null;
+        let jumpScareTimer = null;
+        let currentTier = 0;
+        let highScore = parseFloat(localStorage.getItem('dontBlinkHighScore')) || 0.0;
+        
+        let audioCtx; // Used for dynamic synthesized sounds
+
+        // --- DOM ELEMENTS REFERENCE ---
+        const videoElement = document.getElementById('input-video');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        const faceStatusTxt = document.getElementById('face-status');
+        const mainTitle = document.getElementById('main-title');
+        const instructionTxt = document.getElementById('instruction-text');
+        const timerContainer = document.getElementById('timer-container');
+        const timerText = document.getElementById('timer-text');
+        const actionBtn = document.getElementById('action-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const gamePanel = document.getElementById('game-panel');
+        const screenFlash = document.getElementById('screen-flash');
+        const highScoreDisplay = document.getElementById('high-score-display');
+        const distractionOverlay = document.getElementById('distraction-overlay');
+        const jumpScareOverlay = document.getElementById('jumpscare-overlay');
+        const tierNotification = document.getElementById('tier-notification');
+        const tierText = document.getElementById('tier-text');
+
+        highScoreDisplay.innerText = highScore.toFixed(1) + 's';
+
+        function distance(p1, p2) {
+            return Math.sqrt(
+                Math.pow(p1.x - p2.x, 2) + 
+                Math.pow(p1.y - p2.y, 2) + 
+                Math.pow(p1.z - p2.z, 2)
+            );
+        }
+
+        function calculateEAR(landmarks, eyeIndices) {
+            const p1 = landmarks[eyeIndices[0]]; // Outer corner
+            const p2 = landmarks[eyeIndices[1]]; // Upper 1
+            const p3 = landmarks[eyeIndices[2]]; // Upper 2
+            const p4 = landmarks[eyeIndices[3]]; // Inner corner
+            const p5 = landmarks[eyeIndices[4]]; // Lower 2
+            const p6 = landmarks[eyeIndices[5]]; // Lower 1
+
+            const vert1 = distance(p2, p6);
+            const vert2 = distance(p3, p5);
+            const horiz = distance(p1, p4);
+
+            if (horiz === 0) return 0;
+            return (vert1 + vert2) / (2.0 * horiz); // The Eye Aspect Ratio formula
+        }
+
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playJumpScareSound() {
+            if (!audioCtx) return;
+
+            // 1. Synthesize jarring screech
+            const osc = audioCtx.createOscillator();
+            osc.type = 'sawtooth';
+            
+            // Rapid pitch modulation for horror effect
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.1);
+            osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.3);
+
+            // 2. Add White Noise (Static crackle)
+            const bufferSize = audioCtx.sampleRate * 0.5; // 0.5s duration
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1; // Pure white noise
+            }
+            
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'highpass';
+            noiseFilter.frequency.value = 1500;
+            noise.connect(noiseFilter);
+
+            // 3. Audio routing and gain
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(4.0, audioCtx.currentTime); 
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+
+            osc.connect(gainNode);
+            noiseFilter.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.start();
+            noise.start();
+            
+            osc.stop(audioCtx.currentTime + 0.5);
+        }
+
+        function triggerJumpScare() {
+            if (gameState !== 'PLAYING') return;
+            
+            document.body.classList.add('shake-extreme');
+            jumpScareOverlay.classList.remove('hidden');
+            screenFlash.style.backgroundColor = 'rgba(255, 0, 0, 0.4)';
+            
+            playJumpScareSound();
+
+            setTimeout(() => {
+                document.body.classList.remove('shake-extreme');
+                jumpScareOverlay.classList.add('hidden');
+                screenFlash.style.backgroundColor = '';
+                
+                if (gameState === 'PLAYING') scheduleNextJumpScare();
+            }, 300); // Super fast reset for maximum shock value
+        }
+
+        function scheduleNextJumpScare() {
+            if (jumpScareTimer) clearTimeout(jumpScareTimer);
+            
+            // Dynamic Difficulty: Jump scares become much more frequent at higher tiers
+            const minDelay = Math.max(1000, 5000 - (currentTier * 1000));
+            const maxDelay = Math.max(2000, 8000 - (currentTier * 1500));
+            const nextTime = minDelay + Math.random() * maxDelay; 
+            
+            jumpScareTimer = setTimeout(triggerJumpScare, nextTime);
+        }
+
+        function triggerMinorDistraction() {
+            if (gameState !== 'PLAYING') return;
+            
+            document.body.classList.add('shake-extreme');
+            distractionOverlay.classList.remove('hidden');
+            screenFlash.style.backgroundColor = 'rgba(255, 0, 0, 0.15)';
+
+            const phrases = ["SYSTEM ERROR!", "LOOK BEHIND YOU!", "CORRUPTION!", "VIRUS DETECTED!"];
+            distractionOverlay.querySelector('span').innerText = phrases[Math.floor(Math.random() * phrases.length)];
+
+            setTimeout(() => {
+                document.body.classList.remove('shake-extreme');
+                distractionOverlay.classList.add('hidden');
+                screenFlash.style.backgroundColor = '';
+                
+                if (gameState === 'PLAYING') scheduleNextMinorDistraction();
+            }, 200 + Math.random() * 300); 
+        }
+
+        function scheduleNextMinorDistraction() {
+            if (distractionTimer) clearTimeout(distractionTimer);
+            
+            // Dynamic Difficulty: Distractions become near constant at Tier 4
+            const minDelay = Math.max(500, 2000 - (currentTier * 400));
+            const maxDelay = Math.max(1000, 4000 - (currentTier * 700));
+            const nextTime = minDelay + Math.random() * maxDelay; 
+            
+            distractionTimer = setTimeout(triggerMinorDistraction, nextTime);
+        }
+
+        function showTierNotification(message) {
+            tierText.innerText = message;
+            tierNotification.classList.remove('hidden');
+            
+            // Allow display: block to render before triggering opacity transition
+            setTimeout(() => {
+                tierNotification.classList.remove('opacity-0');
+                tierNotification.classList.add('opacity-100');
+            }, 10);
+            
+            // Fade out
+            setTimeout(() => {
+                tierNotification.classList.remove('opacity-100');
+                tierNotification.classList.add('opacity-0');
+                setTimeout(() => {
+                    tierNotification.classList.add('hidden');
+                }, 500); 
+            }, 4000); 
+        }
+
+        function setGameState(newState) {
+            gameState = newState;
+            
+            if (distractionTimer) clearTimeout(distractionTimer);
+            if (jumpScareTimer) clearTimeout(jumpScareTimer);
+
+            switch(newState) {
+                case 'READY':
+                    currentTier = 0;
+                    mainTitle.innerText = "SYSTEM READY";
+                    mainTitle.className = "text-3xl md:text-5xl font-bold mb-4 md:mb-6 text-neon-green text-center uppercase tracking-widest";
+                    instructionTxt.innerText = "Maintain eye contact. Do not blink or look away.";
+                    instructionTxt.className = "text-base md:text-xl text-center mb-6 md:mb-10 text-gray-300 min-h-[4rem]";
+                    actionBtn.classList.remove('hidden');
+                    resetBtn.classList.add('hidden');
+                    resetBtn.innerText = "Reboot System";
+                    timerContainer.classList.add('hidden');
+                    gamePanel.className = "flex flex-col items-center max-w-2xl w-full bg-black/70 p-6 md:p-10 border-2 border-neon-green rounded-sm pointer-events-auto backdrop-blur-md transition-all duration-300";
+                    screenFlash.className = "flicker absolute inset-0 z-40 bg-black/10 transition-colors duration-200 pointer-events-none";
+                    screenFlash.style.backgroundColor = '';
+                    document.body.classList.remove('shake-extreme');
+                    distractionOverlay.classList.add('hidden');
+                    jumpScareOverlay.classList.add('hidden');
+                    break;
+                    
+                case 'COUNTDOWN':
+                    initAudio(); // Required to unlock audio play permissions
+                    actionBtn.classList.add('hidden');
+                    timerContainer.classList.remove('hidden');
+                    timerText.innerText = '0.0s';
+                    timerText.className = "ml-2 md:ml-4 text-neon-green drop-shadow-[0_0_10px_#0f0]";
+                    let count = 3;
+                    instructionTxt.innerText = `Starting in ${count}...`;
+                    
+                    const countInterval = setInterval(() => {
+                        count--;
+                        if (count > 0) {
+                            instructionTxt.innerText = `Starting in ${count}...`;
+                        } else {
+                            clearInterval(countInterval);
+                            setGameState('PLAYING');
+                        }
+                    }, 1000);
+                    break;
+
+                case 'PLAYING':
+                    instructionTxt.innerText = "HACKING IN PROGRESS... DO NOT BLINK!";
+                    gameStartTime = Date.now();
+                    
+                    scheduleNextMinorDistraction();
+                    scheduleNextJumpScare();
+                    break;
+
+                case 'FAILED':
+                    const survivedTime = ((Date.now() - gameStartTime) / 1000).toFixed(1);
+                    
+                    if (parseFloat(survivedTime) > highScore) {
+                        highScore = parseFloat(survivedTime);
+                        localStorage.setItem('dontBlinkHighScore', highScore);
+                        highScoreDisplay.innerText = highScore.toFixed(1) + 's';
+                        highScoreDisplay.classList.add('text-neon-red', 'glitch-effect');
+                        setTimeout(() => highScoreDisplay.classList.remove('text-neon-red', 'glitch-effect'), 2000);
+                    }
+
+                    mainTitle.innerText = "ACCESS REVOKED";
+                    mainTitle.className = "text-3xl md:text-5xl font-bold mb-4 md:mb-6 text-neon-red text-center uppercase tracking-widest glitch-effect drop-shadow-[0_0_15px_#f00]";
+                    
+                    instructionTxt.innerText = "THE CODEX IS SAFE.";
+                    instructionTxt.className = "text-xl md:text-3xl font-bold text-center mb-6 md:mb-10 text-white min-h-[4rem] drop-shadow-[0_0_10px_#fff]";
+                    
+                    timerText.className = "ml-2 md:ml-4 text-neon-red drop-shadow-[0_0_10px_#f00]";
+                    
+                    gamePanel.className = "flex flex-col items-center max-w-2xl w-full bg-black/90 p-6 md:p-10 border-2 border-neon-red rounded-sm pointer-events-auto backdrop-blur-md transition-all duration-300 shadow-[0_0_30px_rgba(255,0,0,0.4)]";
+                    screenFlash.className = "absolute inset-0 z-40 bg-red-900/60 transition-colors duration-100 pointer-events-none";
+                    resetBtn.classList.remove('hidden');
+                    
+                    // Cleanup scares explicitly
+                    document.body.classList.remove('shake-extreme');
+                    jumpScareOverlay.classList.add('hidden');
+                    distractionOverlay.classList.add('hidden');
+                    break;
+
+                case 'VICTORY':
+                    // Update High Score on win
+                    if (MAX_SURVIVAL_SECONDS > highScore) {
+                        highScore = MAX_SURVIVAL_SECONDS;
+                        localStorage.setItem('dontBlinkHighScore', highScore);
+                        highScoreDisplay.innerText = highScore.toFixed(1) + 's';
+                    }
+
+                    mainTitle.innerText = "ACCESS GRANTED";
+                    mainTitle.className = "text-3xl md:text-5xl font-bold mb-4 md:mb-6 text-neon-green text-center uppercase tracking-widest glitch-effect drop-shadow-[0_0_15px_#0f0]";
+                    
+                    instructionTxt.innerText = "Welcome to the CodeX, How can i help you";
+                    instructionTxt.className = "text-xl md:text-3xl text-center mb-6 md:mb-10 text-white min-h-[4rem] drop-shadow-[0_0_10px_#fff]";
+                    
+                    timerText.className = "ml-2 md:ml-4 text-neon-green drop-shadow-[0_0_10px_#0f0]";
+                    timerText.innerText = `${MAX_SURVIVAL_SECONDS.toFixed(1)}s`;
+                    
+                    gamePanel.className = "flex flex-col items-center max-w-2xl w-full bg-black/90 p-6 md:p-10 border-2 border-neon-green rounded-sm pointer-events-auto backdrop-blur-md transition-all duration-300 shadow-[0_0_30px_rgba(0,255,0,0.4)]";
+                    screenFlash.className = "absolute inset-0 z-40 bg-green-900/20 transition-colors duration-100 pointer-events-none";
+                    
+                    resetBtn.innerText = "Terminate Connection";
+                    resetBtn.classList.remove('hidden');
+                    
+                    document.body.classList.remove('shake-extreme');
+                    jumpScareOverlay.classList.add('hidden');
+                    distractionOverlay.classList.add('hidden');
+                    break;
+            }
+        }
+
+        // Bind interactive events
+        actionBtn.addEventListener('click', () => setGameState('COUNTDOWN'));
+        resetBtn.addEventListener('click', () => setGameState('READY'));
+
+        function onResults(results) {
+            // Keep canvas matching viewport correctly
+            if (canvasElement.width !== window.innerWidth || canvasElement.height !== window.innerHeight) {
+                canvasElement.width = window.innerWidth;
+                canvasElement.height = window.innerHeight;
+            }
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            
+            // Apply dark atmospheric tint to video feed
+            canvasCtx.fillStyle = 'rgba(5, 5, 10, 0.75)';
+            canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+            let faceDetected = false;
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                faceDetected = true;
+                const landmarks = results.multiFaceLandmarks[0];
+                
+                // Track Blinking
+                const leftEAR = calculateEAR(landmarks, LEFT_EYE);
+                const rightEAR = calculateEAR(landmarks, RIGHT_EYE);
+                const avgEAR = (leftEAR + rightEAR) / 2.0;
+
+                // Render neon green (or red) data points on the face
+                canvasCtx.fillStyle = gameState === 'FAILED' ? '#ff0000' : '#00ff00';
+                canvasCtx.shadowBlur = 10;
+                canvasCtx.shadowColor = gameState === 'FAILED' ? '#ff0000' : '#00ff00';
+
+                const drawPoints = (indices) => {
+                    indices.forEach(index => {
+                        const point = landmarks[index];
+                        const x = point.x * canvasElement.width;
+                        const y = point.y * canvasElement.height;
+                        canvasCtx.beginPath();
+                        canvasCtx.rect(x - 2, y - 2, 4, 4); // Square cyperpunk points
+                        canvasCtx.fill();
+                    });
+                };
+                drawPoints(LEFT_EYE);
+                drawPoints(RIGHT_EYE);
+            
+                // Track Head Positon (Yaw/Pitch) to ensure they are looking at the screen
+                const nose = landmarks[NOSE_TIP];
+                const leftCh = landmarks[LEFT_CHEEK];
+                const rightCh = landmarks[RIGHT_CHEEK];
+                const topHd = landmarks[TOP_HEAD];
+                const botCh = landmarks[BOTTOM_CHIN];
+
+                const headWidth = rightCh.x - leftCh.x;
+                const noseRatioX = headWidth !== 0 ? (nose.x - leftCh.x) / headWidth : 0.5;
+
+                const headHeight = botCh.y - topHd.y;
+                const noseRatioY = headHeight !== 0 ? (nose.y - topHd.y) / headHeight : 0.5;
+
+                // Dynamic Difficulty: Head tracking tolerance shrinks heavily each tier
+                const baseTolerance = 0.15;
+                const currentTolerance = Math.max(0.04, baseTolerance - (currentTier * 0.025)); 
+                
+                const headTurnLeftThresh = 0.5 - currentTolerance;
+                const headTurnRightThresh = 0.5 + currentTolerance;
+                const headTurnUpThresh = 0.5 - currentTolerance;
+                const headTurnDownThresh = 0.5 + currentTolerance;
+
+                const isLookingAway = 
+                    noseRatioX < headTurnLeftThresh || 
+                    noseRatioX > headTurnRightThresh ||
+                    noseRatioY < headTurnUpThresh || 
+                    noseRatioY > headTurnDownThresh;
+
+                // Verify game win/fail conditions during active play
+                if (gameState === 'PLAYING') {
+                    const elapsedSec = (Date.now() - gameStartTime) / 1000;
+                    timerText.innerText = `${elapsedSec.toFixed(1)}s`;
+
+                    // Check for ultimate victory (125 seconds)
+                    if (elapsedSec >= MAX_SURVIVAL_SECONDS) {
+                        setGameState('VICTORY');
+                        return; // Halt checking fail conditions immediately
+                    }
+
+                    // Check 25-second tier milestones
+                    if (elapsedSec >= 100 && currentTier < 4) {
+                        currentTier = 4;
+                        showTierNotification("Tier 4 Access Reached");
+                    } else if (elapsedSec >= 75 && currentTier < 3) {
+                        currentTier = 3;
+                        showTierNotification("Tier 3 Access Reached");
+                    } else if (elapsedSec >= 50 && currentTier < 2) {
+                        currentTier = 2;
+                        showTierNotification("Tier 2 Access Reached");
+                    } else if (elapsedSec >= 25 && currentTier < 1) {
+                        currentTier = 1;
+                        showTierNotification("Tier 1 Access Reached");
+                    }
+
+                    // Ensure they fail if they blink or look away
+                    if (isLookingAway || avgEAR < BLINK_THRESHOLD) {
+                        setGameState('FAILED');
+                    }
+                }
+            }
+
+            canvasCtx.restore();
+
+            // Handle UI tracking indicator
+            if (faceDetected) {
+                if(faceStatusTxt.innerText !== 'TRUE') {
+                    faceStatusTxt.innerText = 'TRUE';
+                    faceStatusTxt.className = 'text-xs text-neon-green';
+                }
+                // Transition immediately from Initializing once camera connects
+                if (gameState === 'INITIALIZING') setGameState('READY');
+            } else {
+                if(faceStatusTxt.innerText !== 'FALSE') {
+                    faceStatusTxt.innerText = 'FALSE';
+                    faceStatusTxt.className = 'text-xs text-red-500';
+                }
+            }
+        }
+
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true, // Absolutely crucial for accurate eye closure detection
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+
+        // Prompt for camera access natively via browser
+        camera.start().then(() => {
+            console.log("Camera started successfully.");
+        }).catch((err) => {
+            console.error("Camera error:", err);
+            instructionTxt.innerText = "ERROR: Camera access denied. Please enable webcam permissions in your browser settings.";
+            instructionTxt.className = "text-base md:text-xl text-center mb-6 md:mb-10 text-red-500 min-h-[4rem]";
+        });
+
+        window.addEventListener('resize', () => {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
